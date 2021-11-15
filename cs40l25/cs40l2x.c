@@ -8456,31 +8456,99 @@ static void set_mode(bool long_vib) {
 }
 
 
+static int vib_func_num = 0;
+static int vib_func_boost_level = 0;
+static bool vib_func_start = 0;
+static bool vib_func_stop = 0;
+static bool vib_func_params_read = true;
+
+static struct workqueue_struct *vib_func_wq;
+
+static void uci_vibrate_func(struct work_struct * uci_vibrate_func_work)
+{
+
+    int num = vib_func_num;
+    int boost_level = vib_func_boost_level;
+    bool start = vib_func_start;
+    bool stop = vib_func_stop;
+
+    int scale = 90 - boost_level;
+    bool long_mode = (num >= 50);
+
+    pr_info("%s enter\n",__func__);
+    pr_info("%s inside vib func, params read -- num: %d boost %d start %u stop %u \n",__func__, num, boost_level,start,stop);
+    vib_func_params_read = true;
+
+	if (g_led_cdev == NULL || g_cs40l2x == NULL) return;
+
+	if (scale < 1) scale = 1;
+
+    set_mode(long_mode);
+    set_scale(scale);
+
+
+    if (start) {
+            cs40l2x_vibe_brightness_set(g_led_cdev, 200);
+	}
+    if (start && stop) {
+        if (num<50) mdelay(50);
+            else mdelay(num); // cannot sleep, as this can be in atomic context as well
+    }
+
+    if (stop) {
+// stop
+            cs40l2x_vibe_brightness_set(g_led_cdev, 0);
+    }
+
+    pr_info("%s exit\n",__func__);
+
+}
+static DECLARE_WORK(uci_vibrate_func_work, uci_vibrate_func);
+
+static DEFINE_MUTEX(vib_int);
+
+static void set_vibrate_int(int num, int boost_level, bool start, bool stop) {
+
+#if 1
+	int count = 30;
+	pr_debug("%s enter\n",__func__);
+	mutex_lock(&vib_int);
+	{
+	pr_debug("%s scheduling vib func, setting up params...\n",__func__);
+	while (!vib_func_params_read) {
+		mdelay(10);
+		count--;
+		if (count<=0) break;
+	}
+
+	// this is to set up params, and make sure they are read by the work (TODO use INIT_WORK instead)...
+	vib_func_params_read = false;
+	vib_func_num = num;
+	vib_func_boost_level = boost_level;
+	vib_func_start = start;
+	vib_func_stop = stop;
+	pr_info("%s scheduling vib func, params set, schedule! num: %d boost %d start %u stop %u \n",__func__, num, boost_level,start,stop);
+	queue_work(vib_func_wq,&uci_vibrate_func_work);
+	mutex_unlock(&vib_int);
+	}
+#endif
+	pr_info("%s exit\n",__func__);
+}
+
+
 static void uci_call_handler(char* event, int num_param[], char* str_param) {
         pr_info("%s vibrate event %s %d %s\n",__func__,event,num_param[0],str_param);
         if (g_led_cdev && g_cs40l2x) {
-    	    if (num_param[0]< 100) {
-    		    set_mode(false);
-    	    } else {
-    		    set_mode(true);
-    	    }
+
             if (!strcmp(event,"vibrate_boosted")) {
-        	set_scale(48);
-    		cs40l2x_vibe_brightness_set(g_led_cdev, num_param[0]);
-	    } else
+                set_vibrate_int(num_param[0],80,true,true);
+    	    } else
     	    if (!strcmp(event,"vibrate")) {
-        	set_scale(48);
-    		cs40l2x_vibe_brightness_set(g_led_cdev, num_param[0]);
+                set_vibrate_int(num_param[0],48,true,true);
             } else
-	    if (!strcmp(event,"vibrate_2")) {
-		int scale = 90-num_param[1];
-
-	        pr_info("%s vibrate_2 %d %d %s\n",__func__,num_param[0],num_param[1],str_param);
-
-		if (scale < 1) scale = 1;
-		set_scale(scale);
-		
-    		cs40l2x_vibe_brightness_set(g_led_cdev, num_param[0]);
+    	    if (!strcmp(event,"vibrate_2")) {
+    	        pr_info("%s vibrate_2 %d %d %s\n",__func__,num_param[0],num_param[1],str_param);
+                set_vibrate_int(num_param[0],num_param[1],true,true);
     	    };
     	}
 }
@@ -11926,7 +11994,9 @@ static int cs40l2x_i2c_probe(struct i2c_client *i2c_client,
 
 #ifdef CONFIG_UCI
 	g_cs40l2x = cs40l2x;
-        uci_add_call_handler(uci_call_handler);
+    uci_add_call_handler(uci_call_handler);
+	vib_func_wq = alloc_workqueue("vib_func_wq",
+		WQ_HIGHPRI | WQ_MEM_RECLAIM, 1);
 #endif
 
 	return 0;
