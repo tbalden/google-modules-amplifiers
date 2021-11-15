@@ -40,6 +40,11 @@
 #ifdef CONFIG_UCI
 #include <linux/uci/uci.h>
 struct cs40l2x_private *g_cs40l2x = NULL;
+
+static int booster_percentage = 0;
+static bool booster_in_pocket = false;
+
+static int haptic_percentage = 0;
 #endif
 
 static const char * const cs40l2x_supplies[] = {
@@ -5252,6 +5257,16 @@ static ssize_t cs40l2x_cp_dig_scale_store(struct device *dev,
 	ret = kstrtou32(buf, 10, &dig_scale);
 #ifdef CONFIG_UCI
 	pr_info("%s %d\n",__func__,dig_scale);
+    if (haptic_percentage>0) {
+        dig_scale = (dig_scale*10) / (10+haptic_percentage);
+        if (dig_scale<1) dig_scale = 1;
+    } else {
+        if (booster_in_pocket) {
+            dig_scale = (dig_scale*10) / (10+booster_percentage);
+            if (dig_scale<1) dig_scale = 1;
+        }
+    }
+	pr_info("%s boosted dig_scale = %d\n",__func__,dig_scale);
 #endif
 	if (ret)
 		return -EINVAL;
@@ -8551,6 +8566,14 @@ static void uci_call_handler(char* event, int num_param[], char* str_param) {
                 set_vibrate_int(num_param[0],num_param[1],true,true);
     	    };
     	}
+        if (!strcmp(event,"vibration_set_haptic")) {
+            haptic_percentage = num_param[0];
+	    } else
+	    if (!strcmp(event,"vibration_set_in_pocket")) {
+            booster_percentage = num_param[0];
+            booster_in_pocket = num_param[1];
+        }
+
 }
 #endif
 
