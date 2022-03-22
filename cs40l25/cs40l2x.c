@@ -1854,6 +1854,20 @@ static int cs40l2x_pwle_level_entry(struct cs40l2x_private *cs40l2x, char *token
 		dev_err(cs40l2x->dev, "Failed to parse level: %d\n", ret);
 		return ret;
 	}
+#ifdef CONFIG_UCI
+        pr_info("%s pwle_level = %d\n",__func__,val);
+        if (haptic_percentage>0) {
+    	    // max stock is 0.37, for 0.99 we can do a 170% raise altogether as max
+	    val = (val * (100+((haptic_percentage*150)/100)))/100;
+        } else {
+            if (booster_in_pocket) {
+                val = (val * (100+((booster_percentage*150)/100)))/100;
+            }
+        }
+	if (val<-10000000) val = -10000000;
+	if (val>9995118)   val =   9995118;
+        pr_info("%s boosted pwle_level = %d\n",__func__,val);
+#endif
 
 	section->level = val / (10000000 / 2048);
 
@@ -1879,6 +1893,24 @@ static int cs40l2x_pwle_frequency_entry(struct cs40l2x_private *cs40l2x,
 		dev_err(cs40l2x->dev, "Failed to parse frequency: %d\n", ret);
 		return ret;
 	}
+
+#ifdef CONFIG_UCI
+        pr_info("%s pwle_freq = %d\n",__func__,val);
+        if (haptic_percentage>0) {
+    	    // max stock is 120hz, so 2.7x is still fine in range
+	    val = (val * (100+((haptic_percentage*170)/100)))/100;
+	    if (val>100000) val = 286079; // non cracking peak freq above 100hz, 292hz
+        } else {
+            if (booster_in_pocket) {
+                val = (val * (100+((booster_percentage*170)/100)))/100;
+		if (val>100000) val = 286079; // non cracking peak freq
+            }
+        }
+	if (val<min) val = min;
+	if (val>max) val = max;
+        pr_info("%s boosted pwle_freq = %d\n",__func__,val);
+#endif
+
 
 	if (cs40l2x->ext_freq_min_fw)
 		section->frequency = (val / (1000 / 4));
@@ -5225,11 +5257,11 @@ static ssize_t cs40l2x_cp_dig_scale_store(struct device *dev,
 	pr_info("%s %d\n",__func__,dig_scale);
     if (haptic_percentage>0) {
         dig_scale = (dig_scale*10) / (10+haptic_percentage);
-        if (dig_scale<1) dig_scale = 1;
+        if (dig_scale<0) dig_scale = 0;
     } else {
         if (booster_in_pocket) {
             dig_scale = (dig_scale*10) / (10+booster_percentage);
-            if (dig_scale<1) dig_scale = 1;
+            if (dig_scale<0) dig_scale = 0;
         }
     }
 	pr_info("%s boosted dig_scale = %d\n",__func__,dig_scale);
