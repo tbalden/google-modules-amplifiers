@@ -39,6 +39,7 @@
 
 #ifdef CONFIG_UCI
 #include <linux/uci/uci.h>
+#include <linux/notification/notification.h>
 struct cs40l2x_private *g_cs40l2x = NULL;
 
 static int booster_percentage = 0;
@@ -1355,6 +1356,9 @@ err_exit:
 
 	return ret;
 }
+#ifdef CONFIG_UCI
+static bool trigger_weak = false;
+#endif
 
 static ssize_t cs40l2x_cp_trigger_index_store(struct device *dev,
 					      struct device_attribute *attr,
@@ -1371,10 +1375,26 @@ static ssize_t cs40l2x_cp_trigger_index_store(struct device *dev,
 	pm_runtime_get_sync(cs40l2x->dev);
 	mutex_lock(&cs40l2x->lock);
 
-	ret = cs40l2x_cp_trigger_index_impl(cs40l2x, index);
 #ifdef CONFIG_UCI
-	pr_info("%s %d\n",__func__,index);
+	pr_info("%s index %d\n",__func__,index);
+	if (!ntf_is_screen_on() || !ntf_wake_by_user()) {
+		trigger_weak = false;
+		if (index == CS40L2X_INDEX_OVWR_SAVE) {
+			if (haptic_percentage>0) {
+				if (index == CS40L2X_INDEX_OVWR_SAVE) trigger_weak = true; else trigger_weak = false;
+				index = 0; // do not use pwle mode for playback when boosting, too weak
+			} else {
+				if (booster_in_pocket) {
+					if (index == CS40L2X_INDEX_OVWR_SAVE) trigger_weak = true; else trigger_weak = false;
+					index = 0;
+				}
+			}
+		}
+	}
+	pr_info("%s boosted index: %d\n",__func__,index);
+
 #endif
+	ret = cs40l2x_cp_trigger_index_impl(cs40l2x, index);
 
 	mutex_unlock(&cs40l2x->lock);
 	pm_runtime_mark_last_busy(cs40l2x->dev);
@@ -1854,6 +1874,7 @@ static int cs40l2x_pwle_level_entry(struct cs40l2x_private *cs40l2x, char *token
 		dev_err(cs40l2x->dev, "Failed to parse level: %d\n", ret);
 		return ret;
 	}
+#if 0
 #ifdef CONFIG_UCI
         pr_info("%s pwle_level = %d\n",__func__,val);
         if (haptic_percentage>0) {
@@ -1867,6 +1888,7 @@ static int cs40l2x_pwle_level_entry(struct cs40l2x_private *cs40l2x, char *token
 	if (val<-10000000) val = -10000000;
 	if (val>9995118)   val =   9995118;
         pr_info("%s boosted pwle_level = %d\n",__func__,val);
+#endif
 #endif
 
 	section->level = val / (10000000 / 2048);
@@ -1894,6 +1916,7 @@ static int cs40l2x_pwle_frequency_entry(struct cs40l2x_private *cs40l2x,
 		return ret;
 	}
 
+#if 0
 #ifdef CONFIG_UCI
         pr_info("%s pwle_freq = %d\n",__func__,val);
         if (haptic_percentage>0) {
@@ -1909,6 +1932,7 @@ static int cs40l2x_pwle_frequency_entry(struct cs40l2x_private *cs40l2x,
 	if (val<min) val = min;
 	if (val>max) val = max;
         pr_info("%s boosted pwle_freq = %d\n",__func__,val);
+#endif
 #endif
 
 
@@ -2044,7 +2068,19 @@ static ssize_t cs40l2x_pwle_store(struct device *dev,
 				ret = -EINVAL;
 				goto err_exit;
 			}
-
+#if 0
+#ifdef CONFIG_UCI
+        pr_info("%s pwle_wf = %d\n",__func__,val);
+        if (haptic_percentage>0) {
+    		val = ((haptic_percentage%3)+1)*4;
+        } else {
+            if (booster_in_pocket) {
+    		val = ((booster_percentage%3)+1)*4;
+            }
+        }
+        pr_info("%s boosted pwle_wf = %d\n",__func__,val);
+#endif
+#endif
 			feature = val << CS40L2X_PWLE_WVFRM_FT_SHFT;
 		} else if (!strncmp(type, "RP", 2)) {
 			if (num_vals != 2) {
@@ -7197,6 +7233,10 @@ static void cs40l2x_vibe_pbq_worker(struct work_struct *work)
 	pm_runtime_get_sync(cs40l2x->dev);
 	mutex_lock(&cs40l2x->lock);
 
+#ifdef CONFIG_UCI
+	pr_info("%s state: %d \n",__func__,cs40l2x->pbq_state);
+#endif
+
 	switch (cs40l2x->pbq_state) {
 	case CS40L2X_PBQ_STATE_IDLE:
 		goto err_exit;
@@ -8110,6 +8150,9 @@ static int cs40l2x_playback_effect(struct input_dev *dev, int effect_id, int val
 	cs40l2x->effect = effect;
 
 	mutex_unlock(&cs40l2x->lock);
+#ifdef CONFIG_UCI
+	pr_info("%s effect: %d val: %d\n",__func__,effect, val);
+#endif
 
 	if (val > 0)
 		queue_work(cs40l2x->vibe_workqueue, &cs40l2x->vibe_start_work);
@@ -8234,6 +8277,10 @@ static void cs40l2x_vibe_enable(struct timed_output_dev *sdev, int timeout)
 	struct cs40l2x_private *cs40l2x =
 		container_of(sdev, struct cs40l2x_private, timed_dev);
 
+#ifdef CONFIG_UCI
+	pr_info("%s timeout: %d\n",__func__,timeout);
+#endif
+
 	if (timeout > 0) {
 		mutex_lock(&cs40l2x->lock);
 		cs40l2x->vibe_timeout = timeout;
@@ -8301,6 +8348,7 @@ static int cs40l2x_create_timed_output(struct cs40l2x_private *cs40l2x)
 #else
 #ifdef CONFIG_UCI
 struct led_classdev *g_led_cdev = NULL;
+static void set_vibrate_int(int num, int boost_level, bool start, bool stop, int pause_length);
 #endif
 /* vibration callback for LED device */
 static void cs40l2x_vibe_brightness_set(struct led_classdev *led_cdev,
@@ -8308,6 +8356,22 @@ static void cs40l2x_vibe_brightness_set(struct led_classdev *led_cdev,
 {
 	struct cs40l2x_private *cs40l2x =
 		container_of(led_cdev, struct cs40l2x_private, led_dev);
+
+#ifdef CONFIG_UCI
+	pr_info("%s brightness: %d - trigger_weak boost needed : %d \n",__func__,brightness, trigger_weak);
+	if (brightness != LED_OFF && brightness == 255 && trigger_weak) {
+		int boosting = 10;
+		// in case of a starting weak notification trigger based LED ON, instead of that, let's use internal double vibrate for noticeable results...
+		trigger_weak = false; // let's reset this now
+		if (haptic_percentage>0) {
+			boosting = haptic_percentage/3;
+		}
+		if (booster_in_pocket) {
+			boosting = (booster_percentage*98)/200;
+		}
+		set_vibrate_int(230,boosting,true,true,130);
+	}
+#endif
 
 	switch (brightness) {
 	case LED_OFF:
@@ -8397,6 +8461,7 @@ static int vib_func_boost_level = 0;
 static bool vib_func_start = 0;
 static bool vib_func_stop = 0;
 static bool vib_func_params_read = true;
+static int vib_func_pause_length = 0;
 
 static struct workqueue_struct *vib_func_wq;
 
@@ -8407,12 +8472,13 @@ static void uci_vibrate_func(struct work_struct * uci_vibrate_func_work)
     int boost_level = vib_func_boost_level;
     bool start = vib_func_start;
     bool stop = vib_func_stop;
+    int pause = vib_func_pause_length;
 
     int scale = 90 - boost_level;
     bool long_mode = (num >= 50);
 
     pr_info("%s enter\n",__func__);
-    pr_info("%s inside vib func, params read -- num: %d boost %d start %u stop %u \n",__func__, num, boost_level,start,stop);
+    pr_info("%s inside vib func, params read -- num: %d boost %d start %u stop %u pause %d \n",__func__, num, boost_level,start,stop,pause);
     vib_func_params_read = true;
 
 	if (g_led_cdev == NULL || g_cs40l2x == NULL) return;
@@ -8436,6 +8502,13 @@ static void uci_vibrate_func(struct work_struct * uci_vibrate_func_work)
             cs40l2x_vibe_brightness_set(g_led_cdev, 0);
     }
 
+    if (start && stop && pause>0) {
+	    mdelay(pause);
+            cs40l2x_vibe_brightness_set(g_led_cdev, 200);
+            mdelay(num);
+            cs40l2x_vibe_brightness_set(g_led_cdev, 0);
+    }
+
     pr_info("%s exit\n",__func__);
 
 }
@@ -8443,7 +8516,7 @@ static DECLARE_WORK(uci_vibrate_func_work, uci_vibrate_func);
 
 static DEFINE_MUTEX(vib_int);
 
-static void set_vibrate_int(int num, int boost_level, bool start, bool stop) {
+void set_vibrate_int(int num, int boost_level, bool start, bool stop, int pause_length) {
 
 #if 1
 	int count = 30;
@@ -8463,7 +8536,8 @@ static void set_vibrate_int(int num, int boost_level, bool start, bool stop) {
 	vib_func_boost_level = boost_level;
 	vib_func_start = start;
 	vib_func_stop = stop;
-	pr_info("%s scheduling vib func, params set, schedule! num: %d boost %d start %u stop %u \n",__func__, num, boost_level,start,stop);
+	vib_func_pause_length = pause_length;
+	pr_info("%s scheduling vib func, params set, schedule! num: %d boost %d start %u stop %u pause_length %d\n",__func__, num, boost_level,start,stop, pause_length);
 	queue_work(vib_func_wq,&uci_vibrate_func_work);
 	mutex_unlock(&vib_int);
 	}
@@ -8477,22 +8551,23 @@ static void uci_call_handler(char* event, int num_param[], char* str_param) {
         if (g_led_cdev && g_cs40l2x) {
 
             if (!strcmp(event,"vibrate_boosted")) {
-                set_vibrate_int(num_param[0],80,true,true);
+                set_vibrate_int(num_param[0],80,true,true,0);
     	    } else
     	    if (!strcmp(event,"vibrate")) {
-                set_vibrate_int(num_param[0],48,true,true);
+                set_vibrate_int(num_param[0],48,true,true,0);
             } else
     	    if (!strcmp(event,"vibrate_2")) {
     	        pr_info("%s vibrate_2 %d %d %s\n",__func__,num_param[0],num_param[1],str_param);
-                set_vibrate_int(num_param[0],num_param[1],true,true);
+                set_vibrate_int(num_param[0],num_param[1],true,true,0);
     	    };
     	}
         if (!strcmp(event,"vibration_set_haptic")) {
             haptic_percentage = num_param[0];
-	    } else
-	    if (!strcmp(event,"vibration_set_in_pocket")) {
+	} else
+        if (!strcmp(event,"vibration_set_in_pocket")) {
             booster_percentage = num_param[0];
             booster_in_pocket = num_param[1];
+            pr_info("%s vibrate event %s perc: %d pocketed: %d\n",__func__,event,num_param[0],num_param[1]);
         }
 
 }
