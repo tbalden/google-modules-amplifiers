@@ -46,6 +46,10 @@ static int booster_percentage = 0;
 static bool booster_in_pocket = false;
 
 static int haptic_percentage = 0;
+
+static int set_scale(int scale);
+
+static unsigned int cp_dig_scale = 0;
 #endif
 
 static const char * const cs40l2x_supplies[] = {
@@ -1372,12 +1376,38 @@ err_exit:
 }
 #ifdef CONFIG_UCI
 static bool trigger_weak = false;
+static int trigger_index = 0;
+
+static unsigned int calculate_boosted_scale(unsigned int dig_scale) {
+	if (trigger_index != CS40L2X_INDEX_VIBE || (!ntf_is_screen_on() || !ntf_wake_by_user())) {
+	// if vib mode (notifs, calls, custom app vibs), then only boost when screen is off
+		if (haptic_percentage>0) {
+			dig_scale = (dig_scale*10) / (10+haptic_percentage);
+			if (dig_scale<0) dig_scale = 0;
+		} else {
+			if (booster_in_pocket) {
+				dig_scale = (dig_scale*10) / (10+booster_percentage);
+				if (dig_scale<0) dig_scale = 0;
+			}
+		}
+	} else if (ntf_is_camera_on()) {
+		dig_scale = dig_scale * 2;
+		if (dig_scale > CS40L2X_DIG_SCALE_MAX) dig_scale = CS40L2X_DIG_SCALE_MAX;
+		pr_info("%s camera mode, deboosted dig_scale = %d\n",__func__,dig_scale);
+	}
+	return dig_scale;
+}
+
 #endif
 
 static ssize_t cs40l2x_cp_trigger_index_store(struct device *dev,
 					      struct device_attribute *attr,
 					      const char *buf, size_t count)
 {
+#ifdef CONFIG_UCI
+	unsigned int dig_scale;
+	bool do_set_scale = false;
+#endif
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	unsigned int index;
 	int ret;
@@ -1391,6 +1421,7 @@ static ssize_t cs40l2x_cp_trigger_index_store(struct device *dev,
 
 #ifdef CONFIG_UCI
 	pr_info("%s index %d\n",__func__,index);
+	trigger_index = index;
 	if (!ntf_is_screen_on() || !ntf_wake_by_user()) {
 		trigger_weak = false;
 		if (index == CS40L2X_INDEX_OVWR_SAVE) {
@@ -1407,12 +1438,19 @@ static ssize_t cs40l2x_cp_trigger_index_store(struct device *dev,
 	}
 	pr_info("%s boosted index: %d\n",__func__,index);
 
+	dig_scale = calculate_boosted_scale(cp_dig_scale); // last set cp dig scale calculation to override if needed after knowing trigger type
+	pr_info("%s boosted dig_scale = %d\n",__func__,dig_scale);
+	if (dig_scale!=cp_dig_scale) do_set_scale = true;
 #endif
 	ret = cs40l2x_cp_trigger_index_impl(cs40l2x, index);
 
 	mutex_unlock(&cs40l2x->lock);
 	pm_runtime_mark_last_busy(cs40l2x->dev);
 	pm_runtime_put_autosuspend(cs40l2x->dev);
+#ifdef CONFIG_UCI
+	if (do_set_scale)
+		set_scale(dig_scale);
+#endif
 
 	if (ret)
 		return ret;
@@ -5325,15 +5363,8 @@ static ssize_t cs40l2x_cp_dig_scale_store(struct device *dev,
 	ret = kstrtou32(buf, 10, &dig_scale);
 #ifdef CONFIG_UCI
 	pr_info("%s %d\n",__func__,dig_scale);
-    if (haptic_percentage>0) {
-        dig_scale = (dig_scale*10) / (10+haptic_percentage);
-        if (dig_scale<0) dig_scale = 0;
-    } else {
-        if (booster_in_pocket) {
-            dig_scale = (dig_scale*10) / (10+booster_percentage);
-            if (dig_scale<0) dig_scale = 0;
-        }
-    }
+	cp_dig_scale = dig_scale; // store it for checks in other functions, like trigger_index store
+	dig_scale = calculate_boosted_scale(cp_dig_scale);
 	pr_info("%s boosted dig_scale = %d\n",__func__,dig_scale);
 #endif
 	if (ret)
@@ -8523,7 +8554,7 @@ static int cs40l2x_create_led(struct cs40l2x_private *cs40l2x)
 }
 
 #ifdef CONFIG_UCI
-static int set_scale(int scale) {
+int set_scale(int scale) {
 	struct cs40l2x_private *cs40l2x = g_cs40l2x;
 	int ret = 0;
 	unsigned int dig_scale = scale;
