@@ -1144,7 +1144,8 @@ static int cs40l2x_convert_and_save_comp_data(struct cs40l2x_private *cs40l2x,
 
 	if (comp_size > (cs40l2x->comp_bytes / CS40L2X_WT_NUM_VIRT_SLOTS)) {
 		dev_err(cs40l2x->dev, "Waveform size exceeds available space\n");
-		return -ENOSPC;
+		ret = -ENOSPC;
+		goto err_free;
 	}
 
 	if (over_write)
@@ -1716,15 +1717,16 @@ static int cs40l2x_save_packed_pwle_data(struct cs40l2x_private *cs40l2x,
 	char *zero_pad_data;
 	int ret;
 
-	zero_pad_data = kzalloc(CS40L2X_PWLE_BYTES_MAX, GFP_KERNEL);
+	zero_pad_data = kzalloc(CS40L2X_MAX_WLEN, GFP_KERNEL);
 	if (!zero_pad_data)
 		return -ENOMEM;
 
 	ret = cs40l2x_write_pwle(cs40l2x, zero_pad_data,
-				 CS40L2X_PWLE_BYTES_MAX, pwle);
+				 CS40L2X_MAX_WLEN, pwle);
 
 	if (ret > (cs40l2x->comp_bytes / CS40L2X_WT_NUM_VIRT_SLOTS)) {
 		dev_err(cs40l2x->dev, "PWLE size exceeds available space\n");
+		kfree(zero_pad_data);
 		return -ENOSPC;
 	}
 
@@ -1877,10 +1879,12 @@ static int cs40l2x_pwle_frequency_entry(struct cs40l2x_private *cs40l2x,
 		return ret;
 	}
 
-	if (cs40l2x->ext_freq_min_fw)
+	if (cs40l2x->ext_freq_min_fw) {
 		section->frequency = (val / (1000 / 4));
-	else
+		section->flags |= WT_T12_FLAG_EXT_FREQ;
+	} else {
 		section->frequency = (val / (1000 / 8)) - 400;
+	}
 
 	return ret;
 }
@@ -1926,8 +1930,8 @@ static ssize_t cs40l2x_pwle_store(struct device *dev,
 	bool a = false, v = false;
 	int ret;
 
-	if (count > CS40L2X_PWLE_TOTAL_VALS - 1) {
-		dev_err(dev, "PWLE string too large\n");
+	if (count > CS40L2X_MAX_WLEN - 1) {
+		dev_err(dev, "PWLE string too large: %lu\n", count);
 		return -E2BIG;
 	}
 
@@ -2157,7 +2161,7 @@ static ssize_t cs40l2x_pwle_store(struct device *dev,
 
 	pwle->nsections = num_segs;
 
-	ret = strscpy_pad(cs40l2x->pwle_str, buf, CS40L2X_PWLE_TOTAL_VALS);
+	ret = strscpy_pad(cs40l2x->pwle_str, buf, CS40L2X_MAX_WLEN);
 	if (ret == -E2BIG) {
 		goto err_exit;
         }
@@ -6898,8 +6902,8 @@ static void cs40l2x_vibe_mode_worker(struct work_struct *work)
 		if (ret)
 			goto err_exit;
 
-		ret = regmap_write(regmap, CS40L2X_DSP_VIRT1_MBOX_5,
-					CS40L2X_A2H_I2S_START);
+		ret = cs40l2x_ack_write(cs40l2x, CS40L2X_MBOX_USER_CONTROL,
+					CS40L2X_A2H_I2S_START, CS40L2X_USER_CTRL_SUCCESS);
 		if (ret)
 			goto err_exit;
 

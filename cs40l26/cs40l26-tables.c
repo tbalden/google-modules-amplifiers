@@ -16,6 +16,8 @@
 const struct of_device_id cs40l26_of_match[CS40L26_NUM_DEVS + 1] = {
 	{ .compatible = "cirrus,cs40l26a" },
 	{ .compatible = "cirrus,cs40l26b" },
+	{ .compatible = "cirrus,cs40l27a" },
+	{ .compatible = "cirrus,cs40l27b" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, cs40l26_of_match);
@@ -32,6 +34,14 @@ const struct regmap_config cs40l26_regmap = {
 	.readable_reg = cs40l26_readable_reg,
 	.volatile_reg = cs40l26_volatile_reg,
 	.cache_type = REGCACHE_NONE,
+};
+
+const char * const cs40l26_dbc_names[CS40L26_DBC_NUM_CONTROLS] = {
+		CS40L26_DBC_ENV_REL_COEF_NAME,
+		CS40L26_DBC_RISE_HEADROOM_NAME,
+		CS40L26_DBC_FALL_HEADROOM_NAME,
+		CS40L26_DBC_TX_LVL_THRESH_FS_NAME,
+		CS40L26_DBC_TX_LVL_HOLD_OFF_MS_NAME,
 };
 
 const struct reg_sequence cs40l26_a1_errata[CS40L26_ERRATA_A1_NUM_WRITES] = {

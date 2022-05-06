@@ -108,6 +108,13 @@ static int cs40l26_clk_en(struct snd_soc_dapm_widget *w,
 		if (ret)
 			return ret;
 
+		if (!completion_done(&cs40l26->i2s_cont)) {
+			if (!wait_for_completion_timeout(&cs40l26->i2s_cont,
+				msecs_to_jiffies(CS40L26_ASP_START_TIMEOUT)))
+				dev_warn(codec->dev,
+					"SVC calibration not complete\n");
+		}
+
 		ret = cs40l26_swap_ext_clk(codec, CS40L26_PLL_REFCLK_BCLK);
 		if (ret)
 			return ret;
@@ -240,7 +247,9 @@ static int cs40l26_pcm_ev(struct snd_soc_dapm_widget *w,
 		if (ret)
 			goto err_mutex;
 
-		ret = regmap_write(regmap, reg, codec->svc_for_streaming_data);
+		ret = regmap_update_bits(regmap, reg,
+				CS40L26_SVC_FOR_STREAMING_MASK,
+				codec->svc_for_streaming_data);
 		if (ret) {
 			dev_err(dev, "Failed to specify SVC for streaming\n");
 			goto err_mutex;
