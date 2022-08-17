@@ -1382,8 +1382,14 @@ static unsigned int calculate_boosted_scale(unsigned int dig_scale) {
 	if (trigger_index != CS40L2X_INDEX_VIBE || (!ntf_is_screen_on() || !ntf_wake_by_user())) {
 	// if vib mode (notifs, calls, custom app vibs), then only boost when screen is off
 		if (haptic_percentage>0) {
-			dig_scale = (dig_scale*10) / (10+haptic_percentage);
-			if (dig_scale<0) dig_scale = 0;
+			if (!ntf_is_camera_on()) { // do not boost haptics when camera is on, it can make noises
+				dig_scale = (dig_scale*10) / (10+haptic_percentage);
+				if (dig_scale<0) dig_scale = 0;
+			} else { // less boost when screen is on
+				dig_scale = dig_scale * 2;
+				if (dig_scale > CS40L2X_DIG_SCALE_MAX) dig_scale = CS40L2X_DIG_SCALE_MAX;
+				pr_info("%s camera mode, deboosted dig_scale = %d\n",__func__,dig_scale);
+			}
 		} else {
 			if (booster_in_pocket) {
 				dig_scale = (dig_scale*10) / (10+booster_percentage);
