@@ -13,6 +13,22 @@
 
 #include "cs40l26.h"
 
+#ifdef CONFIG_UCI
+#include <linux/uci/uci.h>
+#include <linux/notification/notification.h>
+//struct cs40l2x_private *g_cs40l2x = NULL;
+struct input_dev *g_dev = NULL;
+
+static int booster_percentage = 0;
+static bool booster_in_pocket = false;
+
+static int haptic_percentage = 0;
+
+static int set_scale(int scale);
+
+static unsigned int cp_dig_scale = 0;
+#endif
+
 static inline bool is_owt(unsigned int index)
 {
 	return index >= CS40L26_OWT_INDEX_START &&
@@ -853,6 +869,9 @@ void cs40l26_vibe_state_update(struct cs40l26_private *cs40l26,
 				__func__);
 		return;
 	}
+#ifdef CONFIG_UCI
+	pr_info("%s cs event: %d\n",__func__,event);
+#endif
 
 	switch (event) {
 	case CS40L26_VIBE_STATE_EVENT_MBOX_PLAYBACK:
@@ -943,6 +962,10 @@ static int cs40l26_handle_irq1(struct cs40l26_private *cs40l26,
 	u32 err_rls = 0;
 	int ret = 0;
 	unsigned int reg, val;
+
+#ifdef CONFIG_UCI
+	pr_info("%s cs irq1: %d\n",__func__,irq1);
+#endif
 
 	switch (irq1) {
 	case CS40L26_IRQ1_GPIO1_RISE:
@@ -1837,6 +1860,9 @@ static void cs40l26_set_gain_worker(struct work_struct *work)
 		gain = cs40l26->gain_pct;
 	}
 
+#ifdef CONFIG_UCI
+	pr_info("%s cs gain: %u%%\n",__func__,gain);
+#endif
 	dev_dbg(cs40l26->dev, "%s: gain = %u%%\n", __func__, gain);
 
 	/* Write Q21.2 value to SOURCE_ATTENUATION */
@@ -1941,6 +1967,9 @@ static void cs40l26_vibe_start_worker(struct work_struct *work)
 		goto err_mutex;
 	}
 
+#ifdef CONFIG_UCI
+	pr_info("%s cs start: %u%% %u%% %d\n",__func__,index, duration, invert);
+#endif
 	if (!cs40l26->vibe_state_reporting)
 		cs40l26_vibe_state_update(cs40l26,
 				CS40L26_VIBE_STATE_EVENT_MBOX_PLAYBACK);
@@ -1960,6 +1989,9 @@ static void cs40l26_vibe_stop_worker(struct work_struct *work)
 
 	dev_dbg(cs40l26->dev, "%s\n", __func__);
 
+#ifdef CONFIG_UCI
+	pr_info("%s cs stop\n",__func__);
+#endif
 	ret = pm_runtime_get_sync(cs40l26->dev);
 	if (ret < 0)
 		return cs40l26_resume_error_handle(cs40l26->dev, ret);
@@ -1998,6 +2030,9 @@ static void cs40l26_set_gain(struct input_dev *dev, u16 gain)
 
 	cs40l26->gain_pct = gain;
 
+#ifdef CONFIG_UCI
+	pr_info("%s cs set gain %u%%\n",__func__,gain);
+#endif
 	queue_work(cs40l26->vibe_workqueue, &cs40l26->set_gain_work);
 }
 
@@ -2010,6 +2045,9 @@ static int cs40l26_playback_effect(struct input_dev *dev,
 	dev_dbg(cs40l26->dev, "%s: effect ID = %d, val = %d\n", __func__,
 			effect_id, val);
 
+#ifdef CONFIG_UCI
+	pr_info("%s cs playback eff_id: %d val: %d\n",__func__,effect_id,val);
+#endif
 	effect = &dev->ff->effects[effect_id];
 	if (!effect) {
 		dev_err(cs40l26->dev, "No such effect to playback\n");
@@ -2025,6 +2063,137 @@ static int cs40l26_playback_effect(struct input_dev *dev,
 
 	return 0;
 }
+
+#ifdef CONFIG_UCI
+int set_scale(int scale) {
+    return 0;
+}
+
+static void set_mode(bool long_vib) {
+	return;
+}
+
+
+static int vib_func_num = 0;
+static int vib_func_boost_level = 0;
+static bool vib_func_start = 0;
+static bool vib_func_stop = 0;
+static bool vib_func_params_read = true;
+static int vib_func_pause_length = 0;
+
+static struct workqueue_struct *vib_func_wq;
+
+static void uci_vibrate_func(struct work_struct * uci_vibrate_func_work)
+{
+
+    int num = vib_func_num;
+    int boost_level = vib_func_boost_level;
+    bool start = vib_func_start;
+    bool stop = vib_func_stop;
+    int pause = vib_func_pause_length;
+
+    int scale = 90 - boost_level;
+    bool long_mode = (num >= 50);
+
+    pr_info("%s enter\n",__func__);
+    pr_info("%s inside vib func, params read -- num: %d boost %d start %u stop %u pause %d \n",__func__, num, boost_level,start,stop,pause);
+    vib_func_params_read = true;
+
+    if (g_dev == NULL) return;
+
+    if (scale < 1) scale = 1;
+
+
+//[  485.972191] cs40l26_set_gain cs set gain 50%
+//[  485.972555] cs40l26_playback_effect cs set gain eff_id: 2 val: 1
+
+    set_mode(long_mode);
+    set_scale(scale);
+
+
+    if (start) {
+            cs40l26_playback_effect(g_dev, 2, 1);
+    }
+    if (start && stop) {
+        if (num<50) mdelay(50);
+            else mdelay(num); // cannot sleep, as this can be in atomic context as well
+    }
+
+    if (stop) {
+// stop
+//            cs40l2x_vibe_brightness_set(g_led_cdev, 0);
+    }
+
+    if (start && stop && pause>0) {
+        mdelay(pause);
+            cs40l26_playback_effect(g_dev, 2, 1);
+            mdelay(num);
+//            cs40l2x_vibe_brightness_set(g_led_cdev, 0);
+    }
+
+    pr_info("%s exit\n",__func__);
+
+}
+static DECLARE_WORK(uci_vibrate_func_work, uci_vibrate_func);
+
+static DEFINE_MUTEX(vib_int);
+
+void set_vibrate_int(int num, int boost_level, bool start, bool stop, int pause_length) {
+
+#if 1
+    int count = 30;
+    pr_debug("%s enter\n",__func__);
+    mutex_lock(&vib_int);
+    {
+    pr_debug("%s scheduling vib func, setting up params...\n",__func__);
+    while (!vib_func_params_read) {
+	mdelay(10);
+	count--;
+	if (count<=0) break;
+    }
+
+    // this is to set up params, and make sure they are read by the work (TODO use INIT_WORK instead)...
+    vib_func_params_read = false;
+    vib_func_num = num;
+    vib_func_boost_level = boost_level;
+    vib_func_start = start;
+    vib_func_stop = stop;
+    vib_func_pause_length = pause_length;
+    pr_info("%s scheduling vib func, params set, schedule! num: %d boost %d start %u stop %u pause_length %d\n",__func__, num, boost_level,start,stop, pause_length);
+    queue_work(vib_func_wq,&uci_vibrate_func_work);
+    mutex_unlock(&vib_int);
+    }
+#endif
+    pr_info("%s exit\n",__func__);
+}
+
+
+static void uci_call_handler(char* event, int num_param[], char* str_param) {
+        pr_info("%s vibrate event %s %d %s\n",__func__,event,num_param[0],str_param);
+        if (g_dev) {
+
+            if (!strcmp(event,"vibrate_boosted")) {
+                set_vibrate_int(num_param[0],80,true,true,0);
+	    } else
+	    if (!strcmp(event,"vibrate")) {
+                set_vibrate_int(num_param[0],48,true,true,0);
+            } else
+	    if (!strcmp(event,"vibrate_2")) {
+	        pr_info("%s vibrate_2 %d %d %s\n",__func__,num_param[0],num_param[1],str_param);
+                set_vibrate_int(num_param[0],num_param[1],true,true,0);
+	    };
+	}
+        if (!strcmp(event,"vibration_set_haptic")) {
+            haptic_percentage = num_param[0];
+    } else
+        if (!strcmp(event,"vibration_set_in_pocket")) {
+            booster_percentage = num_param[0];
+            booster_in_pocket = num_param[1];
+            pr_info("%s vibrate event %s perc: %d pocketed: %d\n",__func__,event,num_param[0],num_param[1]);
+        }
+
+}
+#endif
 
 int cs40l26_get_num_waves(struct cs40l26_private *cs40l26, u32 *num_waves)
 {
@@ -3113,6 +3282,13 @@ static int cs40l26_input_init(struct cs40l26_private *cs40l26)
 #endif
 
 	cs40l26->vibe_init_success = true;
+
+#ifdef CONFIG_UCI
+    g_dev = cs40l26->input;
+    uci_add_call_handler(uci_call_handler);
+    vib_func_wq = alloc_workqueue("vib_func_wq",
+	WQ_HIGHPRI | WQ_MEM_RECLAIM, 1);
+#endif
 
 	return ret;
 }
