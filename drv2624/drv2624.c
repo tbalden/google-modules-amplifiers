@@ -410,7 +410,6 @@ static void uci_prepare(struct drv2624_data *drv2624, int boost, int length) {
 	// seq: 2 0
 	{
 	        struct drv2624_waveform_sequencer sequencer;
-	        int n;
 		static char buf[] = "2 0";
 		static char buf1[] = "1 12 1 12 1 12 1 12 1 12";
 		static char buf2[] = "1 12 1 12 1 12 1 12 1 12 1 12 1 12 1 12";
@@ -419,7 +418,7 @@ static void uci_prepare(struct drv2624_data *drv2624, int boost, int length) {
 
 		if (length>=50) p = buf1;
 		if (length>=250) p = buf2;
-	        n = sscanf(p, "%hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu",
+	        sscanf(p, "%hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu",
     	                   &sequencer.waveform[0].effect, &sequencer.waveform[0].loop,
 	                   &sequencer.waveform[1].effect, &sequencer.waveform[1].loop,
 	                   &sequencer.waveform[2].effect, &sequencer.waveform[2].loop,

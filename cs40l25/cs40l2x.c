@@ -8612,12 +8612,11 @@ err_mutex:
 static void set_mode(bool long_vib) {
 	struct cs40l2x_private *cs40l2x = g_cs40l2x;
 	unsigned int index = long_vib?0:2;
-	int ret;
 
 	pm_runtime_get_sync(cs40l2x->dev);
 	mutex_lock(&cs40l2x->lock);
 
-	ret = cs40l2x_cp_trigger_index_impl(cs40l2x, index);
+	cs40l2x_cp_trigger_index_impl(cs40l2x, index);
 	pr_info("%s %d\n",__func__,index);
 
 	mutex_unlock(&cs40l2x->lock);
