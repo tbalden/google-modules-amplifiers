@@ -19,8 +19,16 @@ static const struct i2c_device_id cs40l26_id_i2c[] = {
 	{"cs40l27b", 3},
 	{}
 };
-
 MODULE_DEVICE_TABLE(i2c, cs40l26_id_i2c);
+
+static const struct of_device_id cs40l26_of_match[CS40L26_NUM_DEVS + 1] = {
+	{ .compatible = "cirrus,cs40l26a" },
+	{ .compatible = "cirrus,cs40l26b" },
+	{ .compatible = "cirrus,cs40l27a" },
+	{ .compatible = "cirrus,cs40l27b" },
+	{}
+};
+MODULE_DEVICE_TABLE(of, cs40l26_of_match);
 
 static int cs40l26_i2c_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
@@ -46,7 +54,16 @@ static int cs40l26_i2c_probe(struct i2c_client *client,
 	cs40l26->dev = dev;
 	cs40l26->irq = client->irq;
 
+#if IS_ENABLED(CONFIG_GOOG_CUST)
+	ret = cs40l26_probe(cs40l26, pdata);
+	if ((ret != 0) && (ret != -ENOMEM)) {
+		dev_err(dev, "Failed to probe. Try to defer probe: %d\n", ret);
+		ret = -EPROBE_DEFER;
+	}
+	return ret;
+#else
 	return cs40l26_probe(cs40l26, pdata);
+#endif
 }
 
 static int cs40l26_i2c_remove(struct i2c_client *client)
